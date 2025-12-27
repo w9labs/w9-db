@@ -1,4 +1,4 @@
-FROM rust:1.75-alpine as builder
+FROM rust:1.83-alpine as builder
 WORKDIR /usr/src/app
 RUN apk add --no-cache musl-dev
 COPY . .
