@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # W9 Database Service (PostgreSQL)
+  w9-db-postgres:
+    image: postgres:16-alpine
+    container_name: w9-db-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-w9admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securepassword}
+      POSTGRES_DB: ${POSTGRES_DB:-w9labs}
+    volumes:
+      - w9-db-data:/var/lib/postgresql/data
+    networks:
+      - w9-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U w9admin -d w9labs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  # W9 Database Manager Backend
+  w9-db-backend:
+    image: ghcr.io/${GITHUB_USER:-your-username}/w9-db-backend:latest
+    container_name: w9-db-backend
+    restart: unless-stopped
+    depends_on:
+      w9-db-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-w9admin}:${POSTGRES_PASSWORD:-securepassword}@w9-db-postgres:5432/${POSTGRES_DB:-w9labs}
+    networks:
+      - w9-network
+    ports:
+      - "${W9_DB_API_PORT:-8082}:8080"
+
+  # W9 Database Manager Frontend
+  w9-db-frontend:
+    image: ghcr.io/${GITHUB_USER:-your-username}/w9-db-frontend:latest
+    container_name: w9-db-frontend
+    restart: unless-stopped
+    depends_on:
+      - w9-db-backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.w9-db.rule=Host(`db.w9.nu`)"
+      - "traefik.http.services.w9-db.loadbalancer.server.port=80"
+    networks:
+      - w9-network
+    ports:
+      - "${W9_DB_FRONTEND_PORT:-8083}:80"
+
+volumes:
+  w9-db-data:
+    driver: local
+
+networks:
+  w9-network:
+    external: true
