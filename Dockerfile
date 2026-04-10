@@ -1,5 +1,5 @@
 # ============================================================
-# Stage 1: Build Rust server (fast, no WASM needed)
+# Stage 1: Build Rust server
 # ============================================================
 FROM rust:1.94-slim AS server-builder
 WORKDIR /app
@@ -11,10 +11,10 @@ RUN mkdir -p server/src client/src
 RUN echo "fn main(){}" > server/src/main.rs && echo "" > client/src/lib.rs
 RUN cargo build --release -p w9-db-server 2>/dev/null || true
 COPY server/src ./server/src
-RUN cargo build --release -p w9-db-server &&     cp target/release/w9-db-server /usr/local/bin/appserver &&     chmod +x /usr/local/bin/appserver &&     ls -la /usr/local/bin/appserver
+RUN cargo build --release -p w9-db-server &&     cp target/release/w9-db-server /usr/local/bin/appserver
 
 # ============================================================
-# Stage 2: Build Leptos WASM client (runs in parallel)
+# Stage 2: Build Leptos WASM client
 # ============================================================
 FROM rust:1.94-slim AS wasm-builder
 WORKDIR /app
@@ -32,12 +32,12 @@ RUN cd client && trunk build --release --dist /app/site/pkg 2>&1 | tail -5 || tr
 # Stage 3: Runtime image
 # ============================================================
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl libssl3 ca-certificates &&     rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash appuser
 COPY --from=server-builder /usr/local/bin/appserver /usr/local/bin/appserver
 COPY --from=wasm-builder /app/site/pkg /app/site/pkg
 WORKDIR /app
-RUN chmod +x /usr/local/bin/appserver && ls -la /usr/local/bin/appserver
+RUN chmod +x /usr/local/bin/appserver
 USER appuser
 EXPOSE 8080
 CMD ["/usr/local/bin/appserver"]
