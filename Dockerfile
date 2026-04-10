@@ -3,14 +3,14 @@
 # ============================================================
 FROM rust:1.94-slim AS wasm-builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y curl pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 RUN rustup target add wasm32-unknown-unknown
-RUN curl -LsSf https://github.com/nicoburns/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar xz -C /usr/local/bin
+RUN cargo install --locked trunk
 COPY Cargo.toml ./
 COPY client/Cargo.toml ./client/
 COPY client/src/ ./client/src/
+COPY client/Trunk.toml ./client/
+COPY client/index.html ./client/
 RUN cd client && trunk build --release --dist /app/site/pkg 2>&1 | tail -5
 
 # ============================================================
