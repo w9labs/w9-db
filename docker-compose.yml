@@ -1,57 +1,53 @@
 version: '3.8'
 
 services:
-  # W9 Database Service (PostgreSQL)
-  w9-db-postgres:
-    image: postgres:16-alpine
-    container_name: w9-db-postgres
+  w9-db:
+    image: ghcr.io/${GITHUB_USER:-w9labs}/w9-db:latest
+    container_name: w9-db
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "traefik.enable=true"
+      - "traefik.http.routers.w9-db.rule=Host(`db.w9.nu`)"
+      - "traefik.http.routers.w9-db.entrypoints=websecure"
+      - "traefik.http.routers.w9-db.tls=true"
+      - "traefik.http.services.w9-db.loadbalancer.server.port=8082"
+    ports:
+      - "${W9_DB_PORT:-8082}:8082"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-w9admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securepassword}
-      POSTGRES_DB: ${POSTGRES_DB:-w9labs}
+      - HOST=0.0.0.0
+      - PORT=8082
+      - DATABASE_URL=${DATABASE_URL:-memory}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - ISSUER_URL=${ISSUER_URL:-https://db.w9.nu}
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL:-admin@w9.nu}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-W9AdminSecure123!}
     volumes:
-      - w9-db-data:/var/lib/postgresql/data
+      - w9-db-data:/app/data
     networks:
       - w9-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U w9admin -d w9labs"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-  # W9 Database Manager Backend
-  w9-db-backend:
-    image: ghcr.io/${GITHUB_USER:-your-username}/w9-db-backend:latest
-    container_name: w9-db-backend
+  # Watchtower for auto-updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: w9-db-watchtower
     restart: unless-stopped
-    depends_on:
-      w9-db-postgres:
-        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-w9admin}:${POSTGRES_PASSWORD:-securepassword}@w9-db-postgres:5432/${POSTGRES_DB:-w9labs}
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_LABEL_ENABLE=true
+    command: --interval 300 --scope w9-db
     networks:
       - w9-network
-    ports:
-      - "${W9_DB_API_PORT:-8082}:8080"
-
-  # W9 Database Manager Frontend
-  w9-db-frontend:
-    image: ghcr.io/${GITHUB_USER:-your-username}/w9-db-frontend:latest
-    container_name: w9-db-frontend
-    restart: unless-stopped
-    depends_on:
-      - w9-db-backend
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.w9-db.rule=Host(`db.w9.nu`)"
-      - "traefik.http.services.w9-db.loadbalancer.server.port=80"
-    networks:
-      - w9-network
-    ports:
-      - "${W9_DB_FRONTEND_PORT:-8083}:80"
 
 volumes:
   w9-db-data:
