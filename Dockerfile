@@ -32,7 +32,7 @@ RUN cd client && trunk build --release --dist /app/site/pkg 2>&1 | tail -5 || tr
 # Stage 3: Runtime image
 # ============================================================
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash appuser
 COPY --from=server-builder /usr/local/bin/appserver /usr/local/bin/appserver
 COPY --from=wasm-builder /app/site/pkg /app/site/pkg
@@ -40,5 +40,5 @@ WORKDIR /app
 RUN chmod +x /usr/local/bin/appserver && ls -la /usr/local/bin/appserver
 USER appuser
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD wget --quiet --tries=1 --spider http://localhost:8080/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl -f http://localhost:8080/api/health || exit 1
 CMD ["/usr/local/bin/appserver"]
