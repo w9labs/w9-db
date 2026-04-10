@@ -1,6 +1,8 @@
 [build]
 target = "index.html"
 dist = "site/pkg"
+release = true
+public_url = "/"
 [serve]
-address = "127.0.0.1"
+addresses = ["127.0.0.1"]
 port = 8080
