@@ -40,4 +40,4 @@ WORKDIR /app
 USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD wget --quiet --tries=1 --spider http://localhost:8080/api/health || exit 1
-CMD ["appserver"]
+CMD ["/usr/local/bin/appserver"]
