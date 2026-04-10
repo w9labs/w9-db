@@ -9,10 +9,9 @@ COPY server/Cargo.toml ./server/
 COPY client/Cargo.toml ./client/
 RUN mkdir -p server/src client/src
 RUN echo "fn main(){}" > server/src/main.rs && echo "" > client/src/lib.rs
-RUN cargo build --release -p w9-db-server 2>/dev/null || true
+RUN cargo fetch --locked 2>/dev/null || cargo fetch
 COPY server/src ./server/src
-RUN cargo build --release -p w9-db-server && \
-    cp target/release/w9-db-server /usr/local/bin/appserver
+RUN cargo build --release -p w9-db-server && cp target/release/w9-db-server /usr/local/bin/appserver
 
 # ============================================================
 # Stage 2: Build Leptos WASM client
@@ -27,14 +26,13 @@ COPY client/Cargo.toml ./client/
 COPY client/src/ ./client/src/
 COPY client/Trunk.toml ./client/
 COPY client/index.html ./client/
-RUN cd client && trunk build --release --dist /app/site/pkg 2>&1 | tail -5 || true
+RUN cd client && trunk build --release --dist /app/site/pkg 2>&1 || true
 
 # ============================================================
 # Stage 3: Runtime image
 # ============================================================
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y curl libssl3 ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl libssl3 ca-certificates &&     rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash appuser
 COPY --from=server-builder /usr/local/bin/appserver /usr/local/bin/appserver
 COPY --from=wasm-builder /app/site/pkg /app/site/pkg
