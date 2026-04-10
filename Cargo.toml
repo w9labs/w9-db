@@ -26,5 +26,3 @@ reqwest = { version = "0.11", features = ["json"] }
 oauth2 = "4"
 url = "2"
 
-# Pin time crate to MSRV-compatible version
-time = ">=0.3.20, <0.3.37"
