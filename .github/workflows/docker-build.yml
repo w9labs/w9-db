@@ -9,6 +9,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'Dockerfile'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
     paths:
@@ -16,6 +17,7 @@ on:
       - 'client/**'
       - 'Cargo.toml'
       - 'Dockerfile'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 concurrency:
