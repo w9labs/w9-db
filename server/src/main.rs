@@ -24,7 +24,7 @@ use uuid::Uuid;
 // Shared CSS & Config
 // ============================================================
 const CSS: &str = include_str!("../infra/templates/voxel.css");
-const TURNSTILE_SITE_KEY: &str = "";
+const TURNSTILE_SITE_KEY: &str = "0x4AAAAAACCVXG8QGZQCQVCA";
 const SCOPES_TEXT: &str = "openid profile email";
 
 // ============================================================
@@ -114,7 +114,7 @@ fn auth_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a hr
 fn user_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/profile">Profile</a><a href="/logout">Logout</a>"#) }
 fn admin_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/admin">Admin</a><a href="/logout">Logout</a>"#) }
 
-const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY"></div></div>"#;
+const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY" data-callback="onSubmit"></div></div>"#;
 fn turnstile_html() -> String { TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY) }
 
 // ============================================================
