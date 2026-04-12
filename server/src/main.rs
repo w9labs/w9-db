@@ -115,7 +115,10 @@ fn user_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a hr
 fn admin_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/admin">Admin</a><a href="/logout">Logout</a>"#) }
 
 const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY" data-callback="onSubmit"></div></div>"#;
-fn turnstile_html() -> String { TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY) }
+fn turnstile_html() -> String {
+    let widget = TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY);
+    format!("{}<script>function onSubmit(token){{document.getElementById('turnstile-token').value=token;document.querySelector('form').submit();}}</script>", widget)
+}
 
 // ============================================================
 // Pages: Home
