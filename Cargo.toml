@@ -22,3 +22,4 @@ anyhow = "1"
 argon2 = "0.5"
 jsonwebtoken = "9"
 rand = "0.8"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
