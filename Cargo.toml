@@ -4,15 +4,20 @@ resolver = "2"
 
 [workspace.dependencies]
 axum = "0.7"
+axum-extra = { version = "0.9", features = ["cookie", "typed-header"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+argon2 = "0.5"
+rand = "0.8"
 tower = "0.5"
-tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 anyhow = "1"
-tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
+time = "0.3"

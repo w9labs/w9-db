@@ -3,6 +3,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock* ./
 COPY server/Cargo.toml ./server/
+COPY server/infra/templates/voxel.css ./server/infra/templates/voxel.css
 RUN mkdir -p server/src
 RUN echo "fn main(){}" > server/src/main.rs
 RUN cargo fetch --locked 2>/dev/null || cargo fetch
