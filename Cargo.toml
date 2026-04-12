@@ -1,16 +1,12 @@
 [workspace]
-members = ["server", "client"]
+members = ["server"]
 resolver = "2"
 
 [workspace.dependencies]
-leptos = "0.6"
-leptos_meta = "0.6"
-leptos_router = "0.6"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-surrealdb = { version = "1", features = ["kv-mem"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 tower = "0.5"
@@ -19,7 +15,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 anyhow = "1"
-argon2 = "0.5"
-jsonwebtoken = "9"
-rand = "0.8"
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }

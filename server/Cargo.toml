@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-w9-db-client = { path = "../client" }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }
