@@ -24,7 +24,7 @@ use uuid::Uuid;
 // Shared CSS & Config
 // ============================================================
 const CSS: &str = include_str!("../infra/templates/voxel.css");
-const TURNSTILE_SITE_KEY: &str = "0x4AAAAAACCVXG8QGZQCQVCA";
+const TURNSTILE_SITE_KEY: &str = "";
 const SCOPES_TEXT: &str = "openid profile email";
 
 // ============================================================
