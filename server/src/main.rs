@@ -114,10 +114,10 @@ fn auth_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a hr
 fn user_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/profile">Profile</a><a href="/logout">Logout</a>"#) }
 fn admin_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/admin">Admin</a><a href="/logout">Logout</a>"#) }
 
-const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY"></div></div>"#;
+const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY" data-callback="onTurnstileSuccess" data-response-field="true" data-response-field-name="turnstile_token"></div></div>"#;
 fn turnstile_html() -> String {
     let widget = TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY);
-    format!("{}<script>document.querySelector('form').addEventListener('submit',function(e){{var t=turnstile&&turnstile.getResponse();if(t){{document.getElementById('turnstile-token').value=t;}}else{{e.preventDefault();}}}});</script>", widget)
+    format!("{}<script>function onTurnstileSuccess(token){{document.querySelector('form button[type=\"submit\"]').disabled=false;}}</script>", widget)
 }
 
 // ============================================================
@@ -132,17 +132,17 @@ fn home_html() -> String {
 // ============================================================
 fn login_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%">Sign In</button></form><p class="text-sm text-center mt-2"><a href="/reset">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Sign In</button></form><p class="text-sm text-center mt-2"><a href="/reset">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
 }
 
 fn register_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Register", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>📝 Create Account</h1>{}<form method="POST" action="/register"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Display Name</label><input type="text" name="display_name" placeholder="Your Name"/><label>Password</label><input type="password" name="password" required minlength="8" placeholder="Min 8 characters"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8" placeholder="Repeat password"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%">Create Account</button></form><p class="text-sm text-center mt-2">Already have an account? <a href="/login">Sign In</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Register", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>📝 Create Account</h1>{}<form method="POST" action="/register"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Display Name</label><input type="text" name="display_name" placeholder="Your Name"/><label>Password</label><input type="password" name="password" required minlength="8" placeholder="Min 8 characters"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8" placeholder="Repeat password"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Create Account</button></form><p class="text-sm text-center mt-2">Already have an account? <a href="/login">Sign In</a></p></div>"#, alert, turnstile_html()))
 }
 
 fn reset_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Reset Password</h1>{}<form method="POST" action="/reset"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%">Send Reset Link</button></form><p class="text-sm text-center mt-2"><a href="/login">Back to login</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Reset Password</h1>{}<form method="POST" action="/reset"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><input type="hidden" name="turnstile_token" id="turnstile-token"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Send Reset Link</button></form><p class="text-sm text-center mt-2"><a href="/login">Back to login</a></p></div>"#, alert, turnstile_html()))
 }
 
 // ============================================================
