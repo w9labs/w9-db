@@ -15,7 +15,7 @@ reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-feature
 argon2 = "0.5"
 rand = "0.8"
 tower = "0.5"
-tower-http = { version = "0.5", features = ["trace", "cors"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
