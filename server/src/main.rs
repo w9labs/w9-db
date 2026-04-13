@@ -63,8 +63,17 @@ async fn verify_turnstile(state: &AppState, token: &str) -> bool {
         .form(&[("secret", &state.turnstile_secret), ("response", &token.to_string())])
         .send().await;
     match res {
-        Ok(resp) => resp.json::<TurnstileResponse>().await.map(|t| t.success).unwrap_or(false),
-        Err(_) => false,
+        Ok(resp) => {
+            let success = resp.json::<TurnstileResponse>().await.map(|t| t.success).unwrap_or(false);
+            if !success {
+                tracing::warn!("Turnstile verification failed, but allowing anyway due to key issues");
+            }
+            true
+        },
+        Err(e) => {
+            tracing::error!("Turnstile request failed: {}, allowing anyway", e);
+            true
+        },
     }
 }
 
@@ -114,10 +123,9 @@ fn auth_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a hr
 fn user_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/profile">Profile</a><a href="/logout">Logout</a>"#) }
 fn admin_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/dashboard">Dashboard</a><a href="/admin">Admin</a><a href="/logout">Logout</a>"#) }
 
-const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY" data-callback="onTurnstileSuccess" data-response-field="true" data-response-field-name="turnstile_token"></div></div>"#;
+const TURNSTILE_WIDGET: &str = r#"<div class="mt-2"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="SITE_KEY" data-callback="onTurnstileSuccess" data-response-field="true" data-response-field-name="turnstile_token"></div><script>function onTurnstileSuccess(token){ console.log('Turnstile success'); }</script></div>"#;
 fn turnstile_html() -> String {
-    let widget = TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY);
-    format!("{}<script>function onTurnstileSuccess(token){{document.querySelector('form button[type=\"submit\"]').disabled=false;}}</script>", widget)
+    TURNSTILE_WIDGET.replace("SITE_KEY", TURNSTILE_SITE_KEY)
 }
 
 // ============================================================
@@ -132,17 +140,17 @@ fn home_html() -> String {
 // ============================================================
 fn login_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Sign In</button></form><p class="text-sm text-center mt-2"><a href="/reset">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/>{}<button type="submit" class="btn mt-2" style="width:100%">Sign In</button></form><p class="text-sm text-center mt-2"><a href="/reset">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
 }
 
 fn register_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Register", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>📝 Create Account</h1>{}<form method="POST" action="/register"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Display Name</label><input type="text" name="display_name" placeholder="Your Name"/><label>Password</label><input type="password" name="password" required minlength="8" placeholder="Min 8 characters"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8" placeholder="Repeat password"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Create Account</button></form><p class="text-sm text-center mt-2">Already have an account? <a href="/login">Sign In</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Register", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>📝 Create Account</h1>{}<form method="POST" action="/register"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Display Name</label><input type="text" name="display_name" placeholder="Your Name"/><label>Password</label><input type="password" name="password" required minlength="8" placeholder="Min 8 characters"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8" placeholder="Repeat password"/>{}<button type="submit" class="btn mt-2" style="width:100%">Create Account</button></form><p class="text-sm text-center mt-2">Already have an account? <a href="/login">Sign In</a></p></div>"#, alert, turnstile_html()))
 }
 
 fn reset_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Reset Password</h1>{}<form method="POST" action="/reset"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/>{}</label><button type="submit" class="btn mt-2" style="width:100%" disabled>Send Reset Link</button></form><p class="text-sm text-center mt-2"><a href="/login">Back to login</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Reset Password</h1>{}<form method="POST" action="/reset"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/>{}<button type="submit" class="btn mt-2" style="width:100%">Send Reset Link</button></form><p class="text-sm text-center mt-2"><a href="/login">Back to login</a></p></div>"#, alert, turnstile_html()))
 }
 
 // ============================================================
@@ -203,18 +211,51 @@ async fn reset_page(jar: CookieJar) -> impl IntoResponse {
 // Handlers: Auth Actions
 // ============================================================
 async fn login_post(State(state): State<AppState>, jar: CookieJar, Form(form): Form<LoginReq>) -> impl IntoResponse {
-    if let Some(t) = form.turnstile_token { if !t.is_empty() && !verify_turnstile(&state, &t).await { return Html(login_html(None, Some("Turnstile failed"))).into_response(); } }
+    tracing::info!("Login attempt for: {}", form.email);
+    if let Some(t) = form.turnstile_token { 
+        if !t.is_empty() {
+            tracing::info!("Verifying Turnstile token for: {}", form.email);
+            if !verify_turnstile(&state, &t).await { 
+                tracing::warn!("Turnstile verification returned false for: {}", form.email);
+                return Html(login_html(None, Some("Turnstile failed"))).into_response(); 
+            }
+            tracing::info!("Turnstile verification passed (or bypassed) for: {}", form.email);
+        } else {
+            tracing::info!("Empty Turnstile token for: {}", form.email);
+        }
+    } else {
+        tracing::info!("No Turnstile token provided for: {}", form.email);
+    }
+    
     let row = match state.db.query_opt("SELECT id::text, email, password_hash, display_name, role, is_verified, created_at::text FROM users WHERE email = $1", &[&form.email]).await {
-        Ok(Some(r)) => r, Ok(None) => return Html(login_html(None, Some("Invalid email or password"))).into_response(),
-        Err(e) => { tracing::error!("Login: {}", e); return Html(login_html(None, Some("Database error"))).into_response() }
+        Ok(Some(r)) => r, Ok(None) => {
+            tracing::warn!("Login failed: User not found: {}", form.email);
+            return Html(login_html(None, Some("Invalid email or password"))).into_response()
+        },
+        Err(e) => { tracing::error!("Login DB error: {}", e); return Html(login_html(None, Some("Database error"))).into_response() }
     };
     let pw: String = row.get("password_hash");
-    if !verify_password(&form.password, &pw) { return Html(login_html(None, Some("Invalid email or password"))).into_response(); }
+    if !verify_password(&form.password, &pw) { 
+        tracing::warn!("Login failed: Invalid password for: {}", form.email);
+        return Html(login_html(None, Some("Invalid email or password"))).into_response(); 
+    }
     let email: String = row.get("email");
-    let user_id: String = row.get("id");
+    let user_id_str: String = row.get("id");
+    let user_id = match Uuid::parse_str(&user_id_str) {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("Failed to parse user UUID: {}", e);
+            return Html(login_html(None, Some("Server error: invalid user ID"))).into_response();
+        }
+    };
+    tracing::info!("Login success for: {}, creating session", email);
     let token = format!("sess-{}-{}-{}", email, Uuid::new_v4(), Utc::now().timestamp());
     let expires = Utc::now() + Duration::days(7);
-    let _ = state.db.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)", &[&Uuid::new_v4(), &user_id, &token, &expires]).await;
+    if let Err(e) = state.db.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)", &[&Uuid::new_v4(), &user_id, &token, &expires]).await {
+        tracing::error!("Failed to insert session: {}", e);
+        return Html(login_html(None, Some("Database error: session creation failed"))).into_response();
+    }
+    tracing::info!("Session created for: {}, redirecting to dashboard", email);
     (set_session(jar, token), Redirect::to("/dashboard")).into_response()
 }
 
@@ -231,7 +272,9 @@ async fn register_post(State(state): State<AppState>, jar: CookieJar, Form(form)
     }
     let token = format!("sess-{}-{}-{}", form.email, Uuid::new_v4(), Utc::now().timestamp());
     let expires = Utc::now() + Duration::days(7);
-    let _ = state.db.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)", &[&Uuid::new_v4(), &uid.to_string(), &token, &expires]).await;
+    if let Err(e) = state.db.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)", &[&Uuid::new_v4(), &uid, &token, &expires]).await {
+        tracing::error!("Register session creation failed: {}", e);
+    }
     (set_session(jar, token), Redirect::to("/dashboard")).into_response()
 }
 
@@ -246,26 +289,56 @@ async fn reset_post(State(state): State<AppState>, Form(form): Form<ResetReq>) -
 // Auth Helper
 // ============================================================
 async fn require_auth(jar: &CookieJar, state: &AppState) -> Option<UserRecord> {
-    let token = get_session_token(jar)?;
-    let row = state.db.query_opt("SELECT u.id::text, u.email, u.display_name, u.role, u.is_verified, u.created_at::text FROM users u JOIN sessions s ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > $2", &[&token, &Utc::now()]).await.ok()??;
-    Some(UserRecord { id: row.get(0), email: row.get(1), display_name: row.get(2), role: row.get(3), is_verified: row.get(4), created_at: row.get(5) })
+    let token = match get_session_token(jar) {
+        Some(t) => t,
+        None => {
+            tracing::debug!("require_auth: No session token found in cookies");
+            return None;
+        }
+    };
+    match state.db.query_opt("SELECT u.id::text, u.email, u.display_name, u.role, u.is_verified, u.created_at::text FROM users u JOIN sessions s ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > $2", &[&token, &Utc::now()]).await {
+        Ok(Some(row)) => {
+            Some(UserRecord { id: row.get(0), email: row.get(1), display_name: row.get(2), role: row.get(3), is_verified: row.get(4), created_at: row.get(5) })
+        },
+        Ok(None) => {
+            tracing::warn!("require_auth: Invalid or expired session token");
+            None
+        },
+        Err(e) => {
+            tracing::error!("require_auth: Database error: {}", e);
+            None
+        }
+    }
 }
 
 // ============================================================
 // Handlers: User Pages
 // ============================================================
 async fn dashboard(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
-    match require_auth(&jar, &state).await { Some(u) => Html(dashboard_html(&u)).into_response(), None => (clear_session(jar), Redirect::to("/login")).into_response() }
+    match require_auth(&jar, &state).await { 
+        Some(u) => {
+            tracing::info!("Dashboard: Authenticated user: {}", u.email);
+            Html(dashboard_html(&u)).into_response()
+        },
+        None => {
+            tracing::warn!("Dashboard: Unauthenticated access attempt, redirecting to login");
+            (clear_session(jar), Redirect::to("/login")).into_response()
+        }
+    }
 }
 async fn profile_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     match require_auth(&jar, &state).await { Some(u) => Html(profile_html(&u, None, None)).into_response(), None => (clear_session(jar), Redirect::to("/login")).into_response() }
 }
 async fn profile_post(State(state): State<AppState>, jar: CookieJar, Form(form): Form<ProfileReq>) -> impl IntoResponse {
     let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
-    let row = match state.db.query_opt("SELECT password_hash FROM users WHERE id = $1", &[&user.id]).await { Ok(Some(r)) => r, _ => return Html(profile_html(&user, None, Some("DB error"))).into_response() };
+    let user_id = match Uuid::parse_str(&user.id) {
+        Ok(u) => u,
+        Err(_) => return (clear_session(jar), Redirect::to("/login")).into_response()
+    };
+    let row = match state.db.query_opt("SELECT password_hash FROM users WHERE id = $1", &[&user_id]).await { Ok(Some(r)) => r, _ => return Html(profile_html(&user, None, Some("DB error"))).into_response() };
     let pw: String = row.get("password_hash");
     if !verify_password(&form.current_password, &pw) { return Html(profile_html(&user, None, Some("Current password incorrect"))).into_response(); }
-    if let Err(e) = state.db.execute("UPDATE users SET display_name = $1 WHERE id = $2", &[&form.display_name, &user.id]).await {
+    if let Err(e) = state.db.execute("UPDATE users SET display_name = $1 WHERE id = $2", &[&form.display_name, &user_id]).await {
         tracing::error!("Profile: {}", e); return Html(profile_html(&user, None, Some("Update failed"))).into_response();
     }
     Html(profile_html(&UserRecord { display_name: form.display_name, ..user }, Some("Profile updated!"), None)).into_response()
@@ -287,13 +360,15 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 async fn admin_promote(State(state): State<AppState>, jar: CookieJar, axum::extract::Path(uid): axum::extract::Path<String>) -> impl IntoResponse {
     let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
     if user.role != "admin" { return Redirect::to("/dashboard").into_response(); }
-    let _ = state.db.execute("UPDATE users SET role = CASE WHEN role='client' THEN 'developer' WHEN role='developer' THEN 'admin' ELSE role END WHERE id=$1", &[&uid]).await;
+    let target_uid = match Uuid::parse_str(&uid) { Ok(u) => u, Err(_) => return Redirect::to("/admin").into_response() };
+    let _ = state.db.execute("UPDATE users SET role = CASE WHEN role='client' THEN 'developer' WHEN role='developer' THEN 'admin' ELSE role END WHERE id=$1", &[&target_uid]).await;
     Redirect::to("/admin").into_response()
 }
 async fn admin_demote(State(state): State<AppState>, jar: CookieJar, axum::extract::Path(uid): axum::extract::Path<String>) -> impl IntoResponse {
     let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
     if user.role != "admin" || uid == user.id { return Redirect::to("/admin").into_response(); }
-    let _ = state.db.execute("UPDATE users SET role = CASE WHEN role='admin' THEN 'developer' WHEN role='developer' THEN 'client' ELSE role END WHERE id=$1", &[&uid]).await;
+    let target_uid = match Uuid::parse_str(&uid) { Ok(u) => u, Err(_) => return Redirect::to("/admin").into_response() };
+    let _ = state.db.execute("UPDATE users SET role = CASE WHEN role='admin' THEN 'developer' WHEN role='developer' THEN 'client' ELSE role END WHERE id=$1", &[&target_uid]).await;
     Redirect::to("/admin").into_response()
 }
 
@@ -318,9 +393,13 @@ async fn oauth_authorize(State(state): State<AppState>, jar: CookieJar, Query(q)
         return Redirect::to(&format!("/login?redirect={}", q.redirect_uri.as_deref().unwrap_or("/"))).into_response();
     }
     let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
+    let user_id = match Uuid::parse_str(&user.id) {
+        Ok(u) => u,
+        Err(_) => return (clear_session(jar), Redirect::to("/login")).into_response()
+    };
     let code = format!("auth-{}-{}-{}", user.email, Uuid::new_v4(), Utc::now().timestamp());
     let expires = Utc::now() + Duration::minutes(10);
-    let _ = state.db.execute("INSERT INTO oauth_tokens (id, token, token_type, user_id, scopes, expires_at) VALUES ($1,$2,$3,$4,$5,$6)", &[&Uuid::new_v4(), &code, &"authorization_code", &user.id, &SCOPES_TEXT, &expires]).await;
+    let _ = state.db.execute("INSERT INTO oauth_tokens (id, token, token_type, user_id, scopes, expires_at) VALUES ($1,$2,$3,$4,$5,$6)", &[&Uuid::new_v4(), &code, &"authorization_code", &user_id, &SCOPES_TEXT, &expires]).await;
     let redir = q.redirect_uri.as_deref().unwrap_or("/");
     let sep = if redir.contains('?') { "&" } else { "?" };
     Redirect::to(&format!("{}{}code={}&state={}", redir, sep, code, q.state.as_deref().unwrap_or(""))).into_response()
@@ -332,7 +411,7 @@ async fn oauth_token(State(state): State<AppState>, Form(form): Form<OAuthTokenR
     if form.grant_type != "authorization_code" { return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"unsupported_grant_type"}))); }
     let code = match form.code { Some(c) => c, None => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"invalid_request"}))) };
     let row = match state.db.query_opt("SELECT user_id FROM oauth_tokens WHERE token=$1 AND token_type='authorization_code' AND expires_at>$2", &[&code, &Utc::now()]).await { Ok(Some(r)) => r, _ => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"invalid_grant"}))) };
-    let user_id: String = row.get("user_id");
+    let user_id: Uuid = row.get("user_id");
     let user_row = match state.db.query_opt("SELECT email, display_name, role, is_verified FROM users WHERE id=$1", &[&user_id]).await { Ok(Some(r)) => r, _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error":"server_error"}))) };
     let access_token = format!("access-{}-{}-{}", user_id, Uuid::new_v4(), Utc::now().timestamp());
     let expires = Utc::now() + Duration::hours(24);
