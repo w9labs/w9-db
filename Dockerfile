@@ -14,6 +14,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y curl libssl3 libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash appuser
 COPY --from=server-builder /usr/local/bin/appserver /usr/local/bin/appserver
+COPY public/w9-logo /app/public/w9-logo
 WORKDIR /app
 RUN chmod +x /usr/local/bin/appserver
 USER appuser
