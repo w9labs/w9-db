@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_postgres::{Client, NoTls};
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{cors::CorsLayer, trace::TraceLayer, services::ServeDir};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
@@ -173,7 +173,7 @@ fn get_session_token(jar: &CookieJar) -> Option<String> {
 // HTML Layout Helpers
 // ============================================================
 fn layout(title: &str, body: &str, nav: &str) -> String {
-    format!(r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>{title} — W9 DB</title><style>{CSS}</style></head><body><div class="app"><nav class="nav"><a href="/" class="brand">🗄️ W9 DB</a><a href="/">Home</a>{nav}</nav>{body}<footer class="footer"><p>W9 DB — OAuth 2.0 / OIDC Provider</p><p class="text-xs text-muted">Rust + Axum + PostgreSQL + argon2</p></footer></div></body></html>"#, title=title, CSS=CSS, nav=nav, body=body)
+    format!(r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>{title} — W9 DB</title><style>{CSS}</style></head><body><div class="app"><nav class="nav"><a href="/" class="brand"><img src="/w9-logo/wordmark-light.svg" alt="W9"/><span>DB</span></a><a href="/">Home</a>{nav}</nav>{body}<footer class="footer"><p>W9 DB — OAuth 2.0 / OIDC Provider</p><p class="text-xs text-muted">Rust + Axum + PostgreSQL + argon2</p></footer></div></body></html>"#, title=title, CSS=CSS, nav=nav, body=body)
 }
 
 fn auth_layout(title: &str, body: &str) -> String { layout(title, body, r#"<a href="/login">Login</a><a href="/register">Register</a>"#) }
@@ -189,7 +189,7 @@ fn turnstile_html() -> String {
 // Pages: Home
 // ============================================================
 fn home_html() -> String {
-    auth_layout("W9 DB", r#"<div class="hero"><h1>🗄️ W9 DB</h1><p>OAuth 2.0 / OIDC Provider for the W9 Network</p><p class="text-sm text-muted">Central authentication shared across all W9 projects</p><div class="flex mt-3" style="justify-content:center"><a href="/register" class="btn">Create Account</a><a href="/login" class="btn btn--ghost">Sign In</a></div></div><div class="grid mt-3"><div class="card"><h3>🔐 OAuth 2.0</h3><p class="text-sm">Standards-based authentication. All W9 services authenticate through this provider.</p></div><div class="card"><h3>👤 User Management</h3><p class="text-sm">Secure registration with argon2 hashing. Three roles: client, developer, admin.</p></div><div class="card"><h3>🤖 Bot Protection</h3><p class="text-sm">Cloudflare Turnstile on all auth pages to prevent automated attacks.</p></div></div>"#)
+    auth_layout("W9 DB", r#"<div class="hero"><img class="hero-logo" src="/w9-logo/hero-transparent.svg" alt="W9 DB"/><h1>🗄️ W9 DB</h1><p>OAuth 2.0 / OIDC Provider for the W9 Network</p><p class="text-sm text-muted">Central authentication shared across all W9 projects</p><div class="flex mt-3" style="justify-content:center"><a href="/register" class="btn">Create Account</a><a href="/login" class="btn btn--ghost">Sign In</a></div></div><div class="grid mt-3"><div class="card"><h3>🔐 OAuth 2.0</h3><p class="text-sm">Standards-based authentication. All W9 services authenticate through this provider.</p></div><div class="card"><h3>👤 User Management</h3><p class="text-sm">Secure registration with argon2 hashing. Three roles: client, developer, admin.</p></div><div class="card"><h3>🤖 Bot Protection</h3><p class="text-sm">Cloudflare Turnstile on all auth pages to prevent automated attacks.</p></div></div>"#)
 }
 
 // ============================================================
@@ -621,6 +621,7 @@ async fn main() -> anyhow::Result<()> {
     seed_admin(&db, &admin_email, &admin_pw).await;
     let state = AppState { db, jwt_secret, turnstile_secret, issuer_url, mail_api_token, mail_base_url, http_client };
     let router = Router::new()
+        .nest_service("/w9-logo", ServeDir::new("public/w9-logo"))
         .route("/", get(home)).route("/login", get(login_page)).route("/login", post(login_post))
         .route("/register", get(register_page)).route("/register", post(register_post))
         .route("/reset", get(reset_page)).route("/reset", post(reset_post))
