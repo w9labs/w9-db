@@ -200,7 +200,7 @@ fn home_html() -> String {
 // ============================================================
 fn login_html(msg: Option<&str>, err: Option<&str>) -> String {
     let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
-    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/>{}<button type="submit" class="btn mt-2" style="width:100%">Sign In</button></form><p class="text-sm text-center mt-2"><a href="/reset">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
+    auth_layout("Login", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔐 Sign In</h1>{}<form method="POST" action="/login"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><label>Password</label><input type="password" name="password" required placeholder="••••••••"/>{}<button type="submit" class="btn mt-2" style="width:100%">Sign In</button></form><p class="text-sm text-center mt-2"><a href="/forgot-password">Forgot password?</a> · <a href="/register">Create account</a></p></div>"#, alert, turnstile_html()))
 }
 
 fn register_html(msg: Option<&str>, err: Option<&str>) -> String {
@@ -220,7 +220,8 @@ fn dashboard_html(user: &UserRecord) -> String {
     let role_badge = match user.role.as_str() { "admin" => r#"<span class="badge badge--err">ADMIN</span>"#, "developer" => r#"<span class="badge badge--warn">DEVELOPER</span>"#, _ => r#"<span class="badge badge--ok">CLIENT</span>"# };
     let verify_badge = if user.is_verified { r#"<span class="badge badge--ok">✓ VERIFIED</span>"# } else { r#"<span class="badge badge--warn">PENDING</span>"# };
     let admin_link = if user.role == "admin" { r#"<a href="/admin" class="btn" style="display:block;text-align:center;margin:.5rem 0">⚙️ Admin Panel</a>"# } else { "" };
-    user_layout("Dashboard", &format!(r#"<div class="hero"><h1>👤 Welcome, {}</h1><p class="text-sm">Account Dashboard</p></div><div class="grid"><div class="card"><h3>Profile</h3><table><tr><td>Email</td><td>{}</td></tr><tr><td>Display Name</td><td>{}</td></tr><tr><td>Role</td><td>{}</td></tr><tr><td>Verified</td><td>{}</td></tr><tr><td>Member Since</td><td>{}</td></tr></table></div><div class="card"><h3>Quick Actions</h3><a href="/profile" class="btn" style="display:block;text-align:center;margin:.5rem 0">Edit Profile</a>{}<a href="/logout" class="btn btn--ghost" style="display:block;text-align:center;margin:.5rem 0">Sign Out</a></div></div>"#, user.display_name.as_deref().unwrap_or(&user.email), user.email, user.display_name.as_deref().unwrap_or("—"), role_badge, verify_badge, user.created_at, admin_link))
+    let resend_link = if !user.is_verified { r#"<a href="/resend-verification" class="btn btn--sm" style="display:block;text-align:center;margin:.5rem 0">📧 Resend Verification</a>"# } else { "" };
+    user_layout("Dashboard", &format!(r#"<div class="hero"><h1>👤 Welcome, {}</h1><p class="text-sm">Account Dashboard</p></div><div class="grid"><div class="card"><h3>Profile</h3><table><tr><td>Email</td><td>{}</td></tr><tr><td>Display Name</td><td>{}</td></tr><tr><td>Role</td><td>{}</td></tr><tr><td>Verified</td><td>{}</td></tr><tr><td>Member Since</td><td>{}</td></tr></table></div><div class="card"><h3>Quick Actions</h3><a href="/profile" class="btn" style="display:block;text-align:center;margin:.5rem 0">Edit Profile</a>{}{}<a href="/logout" class="btn btn--ghost" style="display:block;text-align:center;margin:.5rem 0">Sign Out</a></div></div>"#, user.display_name.as_deref().unwrap_or(&user.email), user.email, user.display_name.as_deref().unwrap_or("—"), role_badge, verify_badge, user.created_at, admin_link, resend_link))
 }
 
 fn profile_html(user: &UserRecord, msg: Option<&str>, err: Option<&str>) -> String {
@@ -235,7 +236,13 @@ fn admin_html(users: &[(String, String, String, String, bool, String)], msg: Opt
         let v = if *verified { "✓" } else { "—" };
         format!(r#"<tr><td class="text-xs">{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td class="text-xs">{}</td><td><a href="/admin/promote/{}" class="btn btn--sm">Promote</a> <a href="/admin/demote/{}" class="btn btn--sm btn--ghost">Demote</a></td></tr>"#, id, email, name.as_str().replace("None", "—"), role_badge, v, created, id, id)
     }).collect();
-    admin_layout("Admin Panel", &format!(r#"<div class="card" style="max-width:900px;margin:2rem auto"><h1>⚙️ Admin Panel</h1>{}<div class="flex flex-between mb-2"><h2>User Management</h2><span class="text-sm text-muted">{} total users</span></div><table><tr><th>ID</th><th>Email</th><th>Name</th><th>Role</th><th>Verified</th><th>Joined</th><th>Actions</th></tr>{}</table></div>"#, alert, users.len(), rows))
+    admin_layout("Admin Panel", &format!(r#"<div class="card" style="max-width:900px;margin:2rem auto"><h1>⚙️ Admin Panel</h1>{}<div class="flex flex-between mb-2"><h2>User Management</h2><span class="text-sm text-muted">{} total users</span></div><table><tr><th>ID</th><th>Email</th><th>Name</th><th>Role</th><th>Verified</th><th>Joined</th><th>Actions</th></tr>{}</table><p class="text-sm text-muted mt-2"><a href="/admin/email-settings">📧 Email Settings</a></p></div>"#, alert, users.len(), rows))
+}
+
+fn email_settings_html(mail_base: &str, mail_token_prefix: &str, sender: &str, msg: Option<&str>, err: Option<&str>) -> String {
+    let alert = match (msg, err) { (Some(m),_) => format!(r#"<div class="alert alert--ok">{}</div>"#,m), (_,Some(e)) => format!(r#"<div class="alert alert--err">{}</div>"#,e), (None,None) => String::new() };
+    let prefix = if mail_token_prefix.is_empty() { "(not set)" } else { mail_token_prefix };
+    admin_layout("Email Settings", &format!(r#"<div class="card" style="max-width:700px;margin:2rem auto"><h1>📧 Email Settings</h1>{}<p class="text-sm text-muted mb-2">Configure w9-mail integration for verification and password reset emails.</p><form method="POST" action="/admin/email-settings"><label>w9-mail Base URL</label><input type="url" name="mail_base_url" value="{}" placeholder="https://mail.w9.nu"/><label>API Token</label><input type="password" name="mail_api_token" value="{}" placeholder="mail-..."/><label>Sender Email (must match w9-mail alias)</label><input type="email" name="sender_email" value="{}" placeholder="noreply@w9.nu"/><button type="submit" class="btn mt-1" style="width:100%">Save Settings</button></form><p class="text-sm text-muted mt-2"><a href="/admin">← Back to Admin Panel</a></p></div>"#, alert, mail_base, prefix, sender))
 }
 
 // ============================================================
@@ -527,6 +534,73 @@ async fn admin_demote(State(state): State<AppState>, jar: CookieJar, axum::extra
 }
 
 // ============================================================
+// Handlers: Email Settings (admin only)
+// ============================================================
+#[derive(Debug, Deserialize)]
+struct EmailSettingsForm { mail_base_url: String, mail_api_token: String, sender_email: String }
+
+async fn email_settings_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
+    if user.role != "admin" { return Html(layout("Forbidden", r#"<div class="card" style="max-width:400px;margin:3rem auto;text-align:center"><h1>🚫 Forbidden</h1><p>Admin access required.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, "")).into_response(); }
+    let mail_base = state.mail_base_url.clone();
+    let token_prefix = if state.mail_api_token.len() > 12 { format!("{}...", &state.mail_api_token[..12]) } else if state.mail_api_token.is_empty() { String::new() } else { state.mail_api_token.clone() };
+    let sender = state.db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok().and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
+    Html(email_settings_html(&mail_base, &token_prefix, &sender, None, None)).into_response()
+}
+async fn email_settings_post(State(state): State<AppState>, jar: CookieJar, Form(form): Form<EmailSettingsForm>) -> impl IntoResponse {
+    let user = match require_auth(&jar, &state).await { Some(u) => u, None => return (clear_session(jar), Redirect::to("/login")).into_response() };
+    if user.role != "admin" { return Redirect::to("/dashboard").into_response(); }
+    let _ = state.db.execute("INSERT INTO app_settings (key, value) VALUES ('mail_base_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", &[&form.mail_base_url]).await;
+    if !form.mail_api_token.is_empty() && form.mail_api_token.starts_with("mail-") { let _ = state.db.execute("INSERT INTO app_settings (key, value) VALUES ('mail_api_token', $1) ON CONFLICT (key) DO UPDATE SET value = $1", &[&form.mail_api_token]).await; }
+    let _ = state.db.execute("INSERT INTO app_settings (key, value) VALUES ('sender_email', $1) ON CONFLICT (key) DO UPDATE SET value = $1", &[&form.sender_email]).await;
+    let prefix = if form.mail_api_token.len() > 12 { format!("{}...", &form.mail_api_token[..12]) } else { form.mail_api_token.clone() };
+    Html(email_settings_html(&form.mail_base_url, &prefix, &form.sender_email, Some("✅ Email settings saved"), None)).into_response()
+}
+
+// ============================================================
+// Handlers: Resend Verification / Forgot Password
+// ============================================================
+async fn resend_verification(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let user = match require_auth(&jar, &state).await { Some(u) => u, None => return Redirect::to("/login").into_response() };
+    if user.is_verified { return Html(layout("Already Verified", &format!(r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>✅ Verified</h1><p>Your email is already verified.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#), "")).into_response(); }
+    let token = Uuid::new_v4().to_string();
+    let expires = Utc::now() + Duration::hours(24);
+    let uid = match Uuid::parse_str(&user.id) { Ok(u) => u, Err(_) => return Html(layout("Error", r#"<div class="card" style="max-width:400px;margin:3rem auto;text-align:center"><h1>Error</h1></div>"#, "")).into_response() };
+    let _ = state.db.execute("INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES ($1,$2,$3)", &[&token, &uid, &expires]).await;
+    let verify_url = format!("{}/verify?token={}", state.issuer_url, token);
+    let subject = "Verify Your W9 DB Account";
+    let body_html = format!(r#"<div style="font-family:sans-serif;padding:20px;"><h2>Verify Your Email</h2><p>Click below to verify:</p><a href="{}" style="display:inline-block;background:#fce126;color:#000;padding:10px 20px;text-decoration:none;">Verify Email →</a><p style="word-break:break-all;font-size:12px;color:#666;">{}</p></div>"#, verify_url, verify_url);
+    let sender = state.db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok().and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
+    let from_alias = if sender.is_empty() { None } else { Some(sender) };
+    let payload = serde_json::json!({"to": &user.email, "subject": subject, "body_html": body_html, "from_alias": from_alias});
+    let res = state.http_client.post(format!("{}/api/email/send", state.mail_base_url)).header("X-API-Token", &state.mail_api_token).json(&payload).send().await;
+    match res { Ok(r) if r.status().is_success() => Html(layout("Email Sent", &format!(r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>📧 Verification Sent</h1><p>Check <strong>{}</strong> for the verification link.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, user.email), "")).into_response(), _ => Html(layout("Failed", r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>❌ Failed</h1><p>Could not send email. Contact support.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, "")).into_response() }
+}
+
+async fn forgot_password_page(jar: CookieJar) -> impl IntoResponse {
+    if get_session_token(&jar).is_some() { return (StatusCode::FOUND, Redirect::to("/dashboard")).into_response(); }
+    Html(auth_layout("Forgot Password", r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Reset Password</h1><p class="text-sm text-muted mb-2">Enter your email for a reset link.</p><form method="POST" action="/forgot-password"><label>Email</label><input type="email" name="email" required placeholder="you@w9.nu"/><button type="submit" class="btn mt-2" style="width:100%">Send Reset Link</button></form><p class="text-sm text-center mt-2"><a href="/login">Back to login</a></p></div>"#)).into_response()
+}
+#[derive(Debug, Deserialize)] struct ForgotPasswordReq { email: String }
+async fn forgot_password_post(State(state): State<AppState>, Form(form): Form<ForgotPasswordReq>) -> impl IntoResponse {
+    let user_opt = state.db.query_opt("SELECT id::text, email, display_name FROM users WHERE email = $1", &[&form.email]).await.ok().flatten();
+    if let Some(row) = user_opt {
+        let email: String = row.get(1);
+        let uid = match Uuid::parse_str(&row.get::<_, String>(0)) { Ok(u) => u, Err(_) => return Html(auth_layout("Sent", r#"<div class="card" style="max-width:420px;margin:2rem auto;text-align:center"><h1>📧 Check Inbox</h1><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response() };
+        let token = Uuid::new_v4().to_string();
+        let expires = Utc::now() + Duration::hours(1);
+        let _ = state.db.execute("INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES ($1,$2,$3)", &[&token, &uid, &expires]).await;
+        let reset_url = format!("{}/reset/confirm?token={}", state.issuer_url, token);
+        let body_html = format!(r#"<div style="font-family:sans-serif;padding:20px;"><h2>Reset Password</h2><a href="{}" style="display:inline-block;background:#fce126;color:#000;padding:10px 20px;text-decoration:none;">Reset Password →</a><p style="word-break:break-all;font-size:12px;color:#666;">{}</p><p>Expires in 1 hour.</p></div>"#, reset_url, reset_url);
+        let sender = state.db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok().and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
+        let from_alias = if sender.is_empty() { None } else { Some(sender) };
+        let payload = serde_json::json!({"to": &email, "subject": "Reset Your W9 DB Password", "body_html": body_html, "from_alias": from_alias});
+        let _ = state.http_client.post(format!("{}/api/email/send", state.mail_base_url)).header("X-API-Token", &state.mail_api_token).json(&payload).send().await;
+    }
+    Html(auth_layout("Sent", r#"<div class="card" style="max-width:420px;margin:2rem auto;text-align:center"><h1>📧 Check Inbox</h1><p>If that email exists, we sent a reset link (expires in 1 hour).</p><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response()
+}
+
+// ============================================================
 // Handlers: API + OAuth
 // ============================================================
 async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
@@ -622,6 +696,21 @@ async fn main() -> anyhow::Result<()> {
     let admin_email = std::env::var("W9_DB_ADMIN_EMAIL").unwrap_or_else(|_| "admin@w9.nu".into());
     let admin_pw = std::env::var("W9_DB_ADMIN_PASSWORD").unwrap_or_else(|_| "W9Admin123!".into());
     seed_admin(&db, &admin_email, &admin_pw).await;
+
+    // Create app_settings table if not exists
+    let _ = db.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)", &[]).await;
+
+    // Load settings from DB, fallback to env
+    let mail_base_url = db.query_opt("SELECT value FROM app_settings WHERE key = 'mail_base_url'", &[]).await.ok()
+        .and_then(|r| r.map(|row| row.get::<_, String>(0)))
+        .unwrap_or_else(|| std::env::var("W9_MAIL_BASE_URL").unwrap_or_else(|_| "https://mail.w9.nu".into()));
+    let mail_api_token = db.query_opt("SELECT value FROM app_settings WHERE key = 'mail_api_token'", &[]).await.ok()
+        .and_then(|r| r.map(|row| row.get::<_, String>(0)))
+        .unwrap_or_else(|| std::env::var("W9_MAIL_API_TOKEN").unwrap_or_default());
+    let _ = db.execute("INSERT INTO app_settings (key, value) VALUES ('mail_base_url', $1) ON CONFLICT (key) DO UPDATE SET value = $1", &[&mail_base_url]).await;
+    let _ = db.execute("INSERT INTO app_settings (key, value) VALUES ('mail_api_token', $1) ON CONFLICT (key) DO UPDATE SET value = $1", &[&mail_api_token]).await;
+    let _ = db.execute("INSERT INTO app_settings (key, value) VALUES ('sender_email', $1) ON CONFLICT (key) DO NOTHING", &[&std::env::var("W9_MAIL_SENDER").unwrap_or_default()]).await;
+
     let state = AppState { db, jwt_secret, turnstile_secret, issuer_url, mail_api_token, mail_base_url, http_client };
     let router = Router::new()
         .nest_service("/w9-logo", ServeDir::new("public/w9-logo"))
@@ -634,6 +723,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/dashboard", get(dashboard)).route("/profile", get(profile_page)).route("/profile", post(profile_post))
         .route("/logout", get(logout))
         .route("/admin", get(admin_page)).route("/admin/promote/:id", get(admin_promote)).route("/admin/demote/:id", get(admin_demote))
+        .route("/admin/email-settings", get(email_settings_page)).route("/admin/email-settings", post(email_settings_post))
+        .route("/resend-verification", get(resend_verification))
+        .route("/forgot-password", get(forgot_password_page)).route("/forgot-password", post(forgot_password_post))
         .route("/api/health", get(health_check)).route("/api/auth/me", get(handle_me))
         .route("/oauth/authorize", get(oauth_authorize)).route("/oauth/token", post(oauth_token))
         .route("/.well-known/openid-configuration", get(oidc_discovery))
