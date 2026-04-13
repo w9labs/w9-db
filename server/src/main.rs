@@ -82,20 +82,33 @@ async fn verify_turnstile(state: &AppState, token: &str) -> bool {
 // ============================================================
 // Email Sending via w9-mail API
 // ============================================================
-async fn send_email_via_w9_mail(state: &AppState, to: &str, from_alias: Option<&str>, subject: &str, body_html: &str) -> Result<(), String> {
-    if state.mail_api_token.is_empty() {
-        tracing::warn!("W9_MAIL_API_TOKEN not configured — skipping email send");
-        return Ok(());
+async fn get_mail_config(db: &Client) -> (String, String, String) {
+    let base = db.query_opt("SELECT value FROM app_settings WHERE key = 'mail_base_url'", &[]).await.ok()
+        .and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_else(|| "https://mail.w9.nu".into());
+    let token = db.query_opt("SELECT value FROM app_settings WHERE key = 'mail_api_token'", &[]).await.ok()
+        .and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
+    let sender = db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok()
+        .and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
+    (base, token, sender)
+}
+
+fn html_escape(s: &str) -> String { s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;") }
+
+async fn send_email_via_w9_mail(db: &Client, http_client: &reqwest::Client, to: &str, from_alias: Option<&str>, subject: &str, body_html: &str) -> Result<(), String> {
+    let (_base, token, sender) = get_mail_config(db).await;
+    if token.is_empty() {
+        return Err("W9_MAIL_API_TOKEN not configured".to_string());
     }
+    let alias = from_alias.or_else(|| if sender.is_empty() { None } else { Some(sender.as_str()) });
     let payload = serde_json::json!({
         "to": to,
-        "from_alias": from_alias,
+        "from_alias": alias,
         "subject": subject,
         "body_html": body_html,
     });
-    let res = state.http_client
-        .post(format!("{}/api/email/send", state.mail_base_url))
-        .header("X-API-Token", &state.mail_api_token)
+    let res = http_client
+        .post(format!("{}/api/email/send", _base))
+        .header("X-API-Token", &token)
         .header("Content-Type", "application/json")
         .json(&payload)
         .send()
@@ -114,22 +127,24 @@ async fn send_email_via_w9_mail(state: &AppState, to: &str, from_alias: Option<&
 async fn send_verification_email(state: &AppState, email: &str, display_name: Option<&str>, token: &str) {
     let name = display_name.unwrap_or("User");
     let verify_url = format!("{}/verify?token={}", state.issuer_url, token);
+    let logo_url = format!("{}/w9-logo/logo-landscape-transparent.svg", state.issuer_url);
     let body_html = format!(
-        r#"<!DOCTYPE html><html><head><style>body{{font-family:sans-serif;background:#160c13;color:#e0d0d0;padding:2rem;}}.card{{background:#32305a;border:2px solid #fce126;padding:2rem;max-width:500px;margin:0 auto;}}h1{{color:#fce126;}}a{{display:inline-block;background:#fce126;color:#160c13;padding:0.75rem 1.5rem;text-decoration:none;font-weight:bold;margin:1rem 0;}}</style></head><body><div class="card"><h1>🗄️ Verify Your W9 DB Account</h1><p>Hi {},</p><p>Click the button below to verify your email address:</p><a href="{}">Verify Email</a><p>Or copy this link: {}</p><p>This link expires in 24 hours.</p></div></body></html>"#,
-        name, verify_url, verify_url
+        r#"<!DOCTYPE html><html><head><style>body{{font-family:'VT323','Press Start 2P',monospace;background:#160c13;color:#fff;padding:2rem;margin:0;}}.wrapper{{max-width:550px;margin:0 auto;}}.header{{background:#32305a;border:4px solid #000;padding:1.5rem;text-align:center;box-shadow:5px 5px 0 #000;}}.header img{{max-width:400px;height:auto;image-rendering:pixelated;}}.header h1{{font-family:'Press Start 2P',monospace;font-size:1.2rem;color:#fce126;text-shadow:3px 3px 0 #000;margin:0.5rem 0;}}.card{{background:#160c13;border:4px solid #000;padding:2rem;margin-top:1rem;box-shadow:5px 5px 0 #000;}}.btn{{display:inline-block;background:#fce126;color:#000;padding:0.8rem 1.5rem;text-decoration:none;font-family:'Press Start 2P',monospace;font-size:0.7rem;border:3px solid #000;box-shadow:3px 3px 0 #000;}}.link{{background:#0a0a0a;border:2px solid #7f8aa8;padding:0.8rem;font-family:monospace;font-size:0.85rem;color:#987b9e;word-break:break-all;margin:0.5rem 0;}}.footer{{margin-top:1rem;padding:1rem;border-top:2px solid #7f8aa8;text-align:center;font-size:0.8rem;color:#7f8aa8;}}</style></head><body><div class="wrapper"><div class="header"><img src="{}" alt="W9 Labs"/><h1>Verify Your Account</h1></div><div class="card"><p style="font-size:1.1rem;line-height:1.6;">Hi <strong style="color:#fce126;">{}</strong>,</p><p style="font-size:1.1rem;line-height:1.6;">Welcome to the W9 Network! Click the button below to verify your email address:</p><p><a href="{}" class="btn">VERIFY EMAIL →</a></p><p style="font-size:0.9rem;color:#7f8aa8;margin-top:1rem;">Or copy this link:</p><div class="link">{}</div><p style="font-size:0.85rem;color:#7f8aa8;">This link expires in 24 hours.</p></div><div class="footer"><p>W9 DB — Central authentication for the W9 Network</p><p><a href="https://w9.se" style="color:#fce126;">w9.se</a></p></div></div></body></html>"#,
+        logo_url, name, verify_url, verify_url
     );
-    if let Err(e) = send_email_via_w9_mail(state, email, None, "Verify your W9 DB account", &body_html).await {
+    if let Err(e) = send_email_via_w9_mail(&state.db, &state.http_client, email, None, "Verify your W9 DB account", &body_html).await {
         tracing::error!("Failed to send verification email: {}", e);
     }
 }
 
 async fn send_reset_email(state: &AppState, email: &str, token: &str) {
     let reset_url = format!("{}/reset/confirm?token={}", state.issuer_url, token);
+    let logo_url = format!("{}/w9-logo/logo-landscape-transparent.svg", state.issuer_url);
     let body_html = format!(
-        r#"<!DOCTYPE html><html><head><style>body{{font-family:sans-serif;background:#160c13;color:#e0d0d0;padding:2rem;}}.card{{background:#32305a;border:2px solid #fce126;padding:2rem;max-width:500px;margin:0 auto;}}h1{{color:#fce126;}}a{{display:inline-block;background:#fce126;color:#160c13;padding:0.75rem 1.5rem;text-decoration:none;font-weight:bold;margin:1rem 0;}}</style></head><body><div class="card"><h1>🔑 Reset Your W9 DB Password</h1><p>A password reset was requested for your account.</p><p>Click the button below to set a new password:</p><a href="{}">Reset Password</a><p>Or copy this link: {}</p><p>This link expires in 1 hour. If you didn't request this, ignore this email.</p></div></body></html>"#,
-        reset_url, reset_url
+        r#"<!DOCTYPE html><html><head><style>body{{font-family:'VT323','Press Start 2P',monospace;background:#160c13;color:#fff;padding:2rem;margin:0;}}.wrapper{{max-width:550px;margin:0 auto;}}.header{{background:#32305a;border:4px solid #000;padding:1.5rem;text-align:center;box-shadow:5px 5px 0 #000;}}.header img{{max-width:400px;height:auto;image-rendering:pixelated;}}.header h1{{font-family:'Press Start 2P',monospace;font-size:1.2rem;color:#fce126;text-shadow:3px 3px 0 #000;margin:0.5rem 0;}}.card{{background:#160c13;border:4px solid #000;padding:2rem;margin-top:1rem;box-shadow:5px 5px 0 #000;}}.btn{{display:inline-block;background:#fce126;color:#000;padding:0.8rem 1.5rem;text-decoration:none;font-family:'Press Start 2P',monospace;font-size:0.7rem;border:3px solid #000;box-shadow:3px 3px 0 #000;}}.link{{background:#0a0a0a;border:2px solid #7f8aa8;padding:0.8rem;font-family:monospace;font-size:0.85rem;color:#987b9e;word-break:break-all;margin:0.5rem 0;}}.footer{{margin-top:1rem;padding:1rem;border-top:2px solid #7f8aa8;text-align:center;font-size:0.8rem;color:#7f8aa8;}}</style></head><body><div class="wrapper"><div class="header"><img src="{}" alt="W9 Labs"/><h1>Reset Your Password</h1></div><div class="card"><p style="font-size:1.1rem;line-height:1.6;">A password reset was requested for your account.</p><p style="font-size:1.1rem;line-height:1.6;">Click the button below to set a new password:</p><p><a href="{}" class="btn">RESET PASSWORD →</a></p><p style="font-size:0.9rem;color:#7f8aa8;margin-top:1rem;">Or copy this link:</p><div class="link">{}</div><p style="font-size:0.85rem;color:#7f8aa8;">This link expires in 1 hour. If you didn't request this, ignore this email.</p></div><div class="footer"><p>W9 DB — Central authentication for the W9 Network</p><p><a href="https://w9.se" style="color:#fce126;">w9.se</a></p></div></div></body></html>"#,
+        logo_url, reset_url, reset_url
     );
-    if let Err(e) = send_email_via_w9_mail(state, email, None, "Reset your W9 DB password", &body_html).await {
+    if let Err(e) = send_email_via_w9_mail(&state.db, &state.http_client, email, None, "Reset your W9 DB password", &body_html).await {
         tracing::error!("Failed to send reset email: {}", e);
     }
 }
@@ -568,13 +583,16 @@ async fn resend_verification(State(state): State<AppState>, jar: CookieJar) -> i
     let uid = match Uuid::parse_str(&user.id) { Ok(u) => u, Err(_) => return Html(layout("Error", r#"<div class="card" style="max-width:400px;margin:3rem auto;text-align:center"><h1>Error</h1></div>"#, "")).into_response() };
     let _ = state.db.execute("INSERT INTO email_verification_tokens (token, user_id, expires_at) VALUES ($1,$2,$3)", &[&token, &uid, &expires]).await;
     let verify_url = format!("{}/verify?token={}", state.issuer_url, token);
-    let subject = "Verify Your W9 DB Account";
-    let body_html = format!(r#"<div style="font-family:sans-serif;padding:20px;"><h2>Verify Your Email</h2><p>Click below to verify:</p><a href="{}" style="display:inline-block;background:#fce126;color:#000;padding:10px 20px;text-decoration:none;">Verify Email →</a><p style="word-break:break-all;font-size:12px;color:#666;">{}</p></div>"#, verify_url, verify_url);
-    let sender = state.db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok().and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
-    let from_alias = if sender.is_empty() { None } else { Some(sender) };
-    let payload = serde_json::json!({"to": &user.email, "subject": subject, "body_html": body_html, "from_alias": from_alias});
-    let res = state.http_client.post(format!("{}/api/email/send", state.mail_base_url)).header("X-API-Token", &state.mail_api_token).json(&payload).send().await;
-    match res { Ok(r) if r.status().is_success() => Html(layout("Email Sent", &format!(r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>📧 Verification Sent</h1><p>Check <strong>{}</strong> for the verification link.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, user.email), "")).into_response(), _ => Html(layout("Failed", r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>❌ Failed</h1><p>Could not send email. Contact support.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, "")).into_response() }
+    let name = user.display_name.as_deref().unwrap_or(&user.email);
+    let logo_url = format!("{}/w9-logo/logo-landscape-transparent.svg", state.issuer_url);
+    let body_html = format!(
+        r#"<!DOCTYPE html><html><head><style>body{{font-family:'VT323','Press Start 2P',monospace;background:#160c13;color:#fff;padding:2rem;margin:0;}}.wrapper{{max-width:550px;margin:0 auto;}}.header{{background:#32305a;border:4px solid #000;padding:1.5rem;text-align:center;box-shadow:5px 5px 0 #000;}}.header img{{max-width:400px;height:auto;image-rendering:pixelated;}}.header h1{{font-family:'Press Start 2P',monospace;font-size:1.2rem;color:#fce126;text-shadow:3px 3px 0 #000;margin:0.5rem 0;}}.card{{background:#160c13;border:4px solid #000;padding:2rem;margin-top:1rem;box-shadow:5px 5px 0 #000;}}.btn{{display:inline-block;background:#fce126;color:#000;padding:0.8rem 1.5rem;text-decoration:none;font-family:'Press Start 2P',monospace;font-size:0.7rem;border:3px solid #000;box-shadow:3px 3px 0 #000;}}.link{{background:#0a0a0a;border:2px solid #7f8aa8;padding:0.8rem;font-family:monospace;font-size:0.85rem;color:#987b9e;word-break:break-all;margin:0.5rem 0;}}.footer{{margin-top:1rem;padding:1rem;border-top:2px solid #7f8aa8;text-align:center;font-size:0.8rem;color:#7f8aa8;}}</style></head><body><div class="wrapper"><div class="header"><img src="{}" alt="W9 Labs"/><h1>Complete Registration</h1></div><div class="card"><p style="font-size:1.1rem;line-height:1.6;">Hi <strong style="color:#fce126;">{}</strong>,</p><p style="font-size:1.1rem;line-height:1.6;">Click below to verify your email:</p><p><a href="{}" class="btn">VERIFY EMAIL →</a></p><p style="font-size:0.9rem;color:#7f8aa8;margin-top:1rem;">Or copy:</p><div class="link">{}</div><p style="font-size:0.85rem;color:#7f8aa8;">Expires in 24 hours.</p></div><div class="footer"><p>W9 DB — Central authentication for the W9 Network</p></div></div></body></html>"#,
+        logo_url, name, verify_url, verify_url
+    );
+    match send_email_via_w9_mail(&state.db, &state.http_client, &user.email, None, "Verify Your W9 DB Account", &body_html).await {
+        Ok(_) => Html(layout("Email Sent", &format!(r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>📧 Verification Sent</h1><p>Check <strong>{}</strong> for the verification link.</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, user.email), "")).into_response(),
+        Err(e) => { tracing::error!("Resend verification failed: {}", e); Html(layout("Failed", &format!(r#"<div class="card" style="max-width:500px;margin:3rem auto;text-align:center"><h1>❌ Failed</h1><p class="alert alert--err">{}</p><a href="/dashboard" class="btn mt-2">Dashboard</a></div>"#, html_escape(&e)), "")).into_response() }
+    }
 }
 
 async fn forgot_password_page(jar: CookieJar) -> impl IntoResponse {
@@ -591,11 +609,12 @@ async fn forgot_password_post(State(state): State<AppState>, Form(form): Form<Fo
         let expires = Utc::now() + Duration::hours(1);
         let _ = state.db.execute("INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES ($1,$2,$3)", &[&token, &uid, &expires]).await;
         let reset_url = format!("{}/reset/confirm?token={}", state.issuer_url, token);
-        let body_html = format!(r#"<div style="font-family:sans-serif;padding:20px;"><h2>Reset Password</h2><a href="{}" style="display:inline-block;background:#fce126;color:#000;padding:10px 20px;text-decoration:none;">Reset Password →</a><p style="word-break:break-all;font-size:12px;color:#666;">{}</p><p>Expires in 1 hour.</p></div>"#, reset_url, reset_url);
-        let sender = state.db.query_opt("SELECT value FROM app_settings WHERE key = 'sender_email'", &[]).await.ok().and_then(|r| r.map(|row| row.get::<_, String>(0))).unwrap_or_default();
-        let from_alias = if sender.is_empty() { None } else { Some(sender) };
-        let payload = serde_json::json!({"to": &email, "subject": "Reset Your W9 DB Password", "body_html": body_html, "from_alias": from_alias});
-        let _ = state.http_client.post(format!("{}/api/email/send", state.mail_base_url)).header("X-API-Token", &state.mail_api_token).json(&payload).send().await;
+        let logo_url = format!("{}/w9-logo/logo-landscape-transparent.svg", state.issuer_url);
+        let body_html = format!(
+            r#"<!DOCTYPE html><html><head><style>body{{font-family:'VT323','Press Start 2P',monospace;background:#160c13;color:#fff;padding:2rem;margin:0;}}.wrapper{{max-width:550px;margin:0 auto;}}.header{{background:#32305a;border:4px solid #000;padding:1.5rem;text-align:center;box-shadow:5px 5px 0 #000;}}.header img{{max-width:400px;height:auto;image-rendering:pixelated;}}.header h1{{font-family:'Press Start 2P',monospace;font-size:1.2rem;color:#fce126;text-shadow:3px 3px 0 #000;margin:0.5rem 0;}}.card{{background:#160c13;border:4px solid #000;padding:2rem;margin-top:1rem;box-shadow:5px 5px 0 #000;}}.btn{{display:inline-block;background:#fce126;color:#000;padding:0.8rem 1.5rem;text-decoration:none;font-family:'Press Start 2P',monospace;font-size:0.7rem;border:3px solid #000;box-shadow:3px 3px 0 #000;}}.link{{background:#0a0a0a;border:2px solid #7f8aa8;padding:0.8rem;font-family:monospace;font-size:0.85rem;color:#987b9e;word-break:break-all;margin:0.5rem 0;}}.footer{{margin-top:1rem;padding:1rem;border-top:2px solid #7f8aa8;text-align:center;font-size:0.8rem;color:#7f8aa8;}}</style></head><body><div class="wrapper"><div class="header"><img src="{}" alt="W9 Labs"/><h1>Reset Your Password</h1></div><div class="card"><p style="font-size:1.1rem;line-height:1.6;">Click below to set a new password:</p><p><a href="{}" class="btn">RESET PASSWORD →</a></p><p style="font-size:0.9rem;color:#7f8aa8;margin-top:1rem;">Or copy:</p><div class="link">{}</div><p style="font-size:0.85rem;color:#7f8aa8;">Expires in 1 hour. If you didn't request this, ignore this email.</p></div><div class="footer"><p>W9 DB — Central authentication for the W9 Network</p></div></div></body></html>"#,
+            logo_url, reset_url, reset_url
+        );
+        let _ = send_email_via_w9_mail(&state.db, &state.http_client, &email, None, "Reset Your W9 DB Password", &body_html).await;
     }
     Html(auth_layout("Sent", r#"<div class="card" style="max-width:420px;margin:2rem auto;text-align:center"><h1>📧 Check Inbox</h1><p>If that email exists, we sent a reset link (expires in 1 hour).</p><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response()
 }
