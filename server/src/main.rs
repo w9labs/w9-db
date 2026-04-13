@@ -174,7 +174,7 @@ fn get_session_token(jar: &CookieJar) -> Option<String> {
 // ============================================================
 fn layout(title: &str, body: &str, nav: &str) -> String {
     format!(
-r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>{title} — W9 DB</title><style>{CSS}</style></head><body><div class="app"><nav class="nav"><div class="nav-inner"><a href="/" class="brand"><img src="/w9-logo/wordmark.svg" alt="W9 Labs"/><span class="brand-text">DB</span></a><div class="nav-links"><a href="/">Home</a>{nav}</div></div></nav><main class="app-main">{body}</main><footer class="footer"><img class="footer-logo" src="/w9-logo/wordmark-dark.svg" alt="W9 Labs"/><p>W9 DB — OAuth 2.0 / OIDC Provider</p><p class="text-xs text-muted">Central authentication for the W9 Network</p></footer></div></body></html>"#,
+r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>{title} — W9 DB</title><style>{CSS}</style></head><body><div class="app"><nav class="nav"><div class="nav-inner"><a href="/" class="brand"><img src="/w9-logo/wordmark.svg" alt="W9 Labs"/><span class="brand-text">DB</span></a><div class="nav-links"><a href="/">Home</a>{nav}</div></div></nav><main class="app-main">{body}</main><footer class="footer"><img class="footer-logo" src="/w9-logo/wordmark.svg" alt="W9 Labs"/><p>W9 DB — OAuth 2.0 / OIDC Provider</p><p class="text-xs text-muted">Central authentication for the W9 Network</p></footer></div></body></html>"#,
         title = title, CSS = CSS, nav = nav, body = body
     )
 }
