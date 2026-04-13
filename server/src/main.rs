@@ -36,6 +36,8 @@ pub struct AppState {
     pub jwt_secret: String,
     pub turnstile_secret: String,
     pub issuer_url: String,
+    pub mail_api_token: String,
+    pub mail_base_url: String,
     pub http_client: reqwest::Client,
 }
 
@@ -74,6 +76,61 @@ async fn verify_turnstile(state: &AppState, token: &str) -> bool {
             tracing::error!("Turnstile request failed: {}, allowing anyway", e);
             true
         },
+    }
+}
+
+// ============================================================
+// Email Sending via w9-mail API
+// ============================================================
+async fn send_email_via_w9_mail(state: &AppState, to: &str, from_alias: Option<&str>, subject: &str, body_html: &str) -> Result<(), String> {
+    if state.mail_api_token.is_empty() {
+        tracing::warn!("W9_MAIL_API_TOKEN not configured — skipping email send");
+        return Ok(());
+    }
+    let payload = serde_json::json!({
+        "to": to,
+        "from_alias": from_alias,
+        "subject": subject,
+        "body_html": body_html,
+    });
+    let res = state.http_client
+        .post(format!("{}/api/email/send", state.mail_base_url))
+        .header("X-API-Token", &state.mail_api_token)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    let status = res.status();
+    let body = res.text().await.unwrap_or_default();
+    if status.is_success() {
+        tracing::info!("✅ Email sent to {} — {}", to, subject);
+        Ok(())
+    } else {
+        Err(format!("w9-mail returned {}: {}", status, body))
+    }
+}
+
+async fn send_verification_email(state: &AppState, email: &str, display_name: Option<&str>, token: &str) {
+    let name = display_name.unwrap_or("User");
+    let verify_url = format!("{}/verify?token={}", state.issuer_url, token);
+    let body_html = format!(
+        r#"<!DOCTYPE html><html><head><style>body{{font-family:sans-serif;background:#160c13;color:#e0d0d0;padding:2rem;}}.card{{background:#32305a;border:2px solid #fce126;padding:2rem;max-width:500px;margin:0 auto;}}h1{{color:#fce126;}}a{{display:inline-block;background:#fce126;color:#160c13;padding:0.75rem 1.5rem;text-decoration:none;font-weight:bold;margin:1rem 0;}}</style></head><body><div class="card"><h1>🗄️ Verify Your W9 DB Account</h1><p>Hi {},</p><p>Click the button below to verify your email address:</p><a href="{}">Verify Email</a><p>Or copy this link: {}</p><p>This link expires in 24 hours.</p></div></body></html>"#,
+        name, verify_url, verify_url
+    );
+    if let Err(e) = send_email_via_w9_mail(state, email, None, "Verify your W9 DB account", &body_html).await {
+        tracing::error!("Failed to send verification email: {}", e);
+    }
+}
+
+async fn send_reset_email(state: &AppState, email: &str, token: &str) {
+    let reset_url = format!("{}/reset/confirm?token={}", state.issuer_url, token);
+    let body_html = format!(
+        r#"<!DOCTYPE html><html><head><style>body{{font-family:sans-serif;background:#160c13;color:#e0d0d0;padding:2rem;}}.card{{background:#32305a;border:2px solid #fce126;padding:2rem;max-width:500px;margin:0 auto;}}h1{{color:#fce126;}}a{{display:inline-block;background:#fce126;color:#160c13;padding:0.75rem 1.5rem;text-decoration:none;font-weight:bold;margin:1rem 0;}}</style></head><body><div class="card"><h1>🔑 Reset Your W9 DB Password</h1><p>A password reset was requested for your account.</p><p>Click the button below to set a new password:</p><a href="{}">Reset Password</a><p>Or copy this link: {}</p><p>This link expires in 1 hour. If you didn't request this, ignore this email.</p></div></body></html>"#,
+        reset_url, reset_url
+    );
+    if let Err(e) = send_email_via_w9_mail(state, email, None, "Reset your W9 DB password", &body_html).await {
+        tracing::error!("Failed to send reset email: {}", e);
     }
 }
 
@@ -270,6 +327,11 @@ async fn register_post(State(state): State<AppState>, jar: CookieJar, Form(form)
     if let Err(e) = state.db.execute("INSERT INTO users (id, email, password_hash, display_name, role, is_verified) VALUES ($1,$2,$3,$4,$5,$6)", &[&uid, &form.email, &pw_hash, &form.display_name, &"client", &false]).await {
         tracing::error!("Register: {}", e); return Html(register_html(None, Some("Registration failed"))).into_response();
     }
+    // Generate verification token and send email
+    let verify_token = Uuid::new_v4().to_string();
+    let verify_expires = Utc::now() + Duration::hours(24);
+    let _ = state.db.execute("INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES ($1,$2,$3)", &[&uid, &verify_token, &verify_expires]).await;
+    send_verification_email(&state, &form.email, form.display_name.as_deref(), &verify_token).await;
     let token = format!("sess-{}-{}-{}", form.email, Uuid::new_v4(), Utc::now().timestamp());
     let expires = Utc::now() + Duration::days(7);
     if let Err(e) = state.db.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES ($1,$2,$3,$4)", &[&Uuid::new_v4(), &uid, &token, &expires]).await {
@@ -281,7 +343,22 @@ async fn register_post(State(state): State<AppState>, jar: CookieJar, Form(form)
 async fn reset_post(State(state): State<AppState>, Form(form): Form<ResetReq>) -> impl IntoResponse {
     if let Some(t) = form.turnstile_token { if !t.is_empty() && !verify_turnstile(&state, &t).await { return Html(reset_html(None, Some("Turnstile failed"))).into_response(); } }
     let exists: bool = state.db.query_one("SELECT COUNT(*) FROM users WHERE email = $1", &[&form.email]).await.map(|r| { let c: i64 = r.get(0); c > 0 }).unwrap_or(false);
-    if exists { tracing::info!("Reset requested: {}", form.email); /* TODO: call w9-mail API */ }
+    if exists {
+        // Generate reset token and send email
+        match state.db.query_one("SELECT id::text FROM users WHERE email = $1", &[&form.email]).await {
+            Ok(row) => {
+                let uid_str: String = row.get(0);
+                if let Ok(uid) = Uuid::parse_str(&uid_str) {
+                    let reset_token = Uuid::new_v4().to_string();
+                    let reset_expires = Utc::now() + Duration::hours(1);
+                    let _ = state.db.execute("INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1,$2,$3)", &[&uid, &reset_token, &reset_expires]).await;
+                    send_reset_email(&state, &form.email, &reset_token).await;
+                }
+            }
+            Err(e) => tracing::error!("Reset query failed: {}", e),
+        }
+        tracing::info!("Reset requested: {}", form.email);
+    }
     Html(reset_html(Some("If an account exists, a reset link has been sent."), None)).into_response()
 }
 
@@ -344,6 +421,80 @@ async fn profile_post(State(state): State<AppState>, jar: CookieJar, Form(form):
     Html(profile_html(&UserRecord { display_name: form.display_name, ..user }, Some("Profile updated!"), None)).into_response()
 }
 async fn logout(jar: CookieJar) -> impl IntoResponse { (clear_session(jar), Redirect::to("/")).into_response() }
+
+// ============================================================
+// Handlers: Email Verification & Password Reset
+// ============================================================
+#[derive(Debug, Deserialize)]
+struct VerifyQuery { token: Option<String> }
+#[derive(Debug, Deserialize)]
+struct ResetConfirmQuery { token: Option<String> }
+#[derive(Debug, Deserialize)]
+struct ResetConfirmPost { password: String, password_confirm: String }
+
+async fn verify_email(State(state): State<AppState>, jar: CookieJar, Query(q): Query<VerifyQuery>) -> impl IntoResponse {
+    let token = match q.token {
+        Some(t) => t,
+        None => return Html(auth_layout("Verify Email", r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🗄️ Verify Email</h1><div class="alert alert--err">No verification token provided.</div><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response(),
+    };
+    match state.db.query_opt("SELECT e.user_id::text, u.email, u.display_name FROM email_verification_tokens e JOIN users u ON e.user_id = u.id WHERE e.token = $1 AND e.used = false AND e.expires_at > NOW()", &[&token]).await {
+        Ok(Some(row)) => {
+            let uid_str: String = row.get(0);
+            let email: String = row.get(1);
+            if let Ok(uid) = Uuid::parse_str(&uid_str) {
+                let _ = state.db.execute("UPDATE users SET is_verified = true WHERE id = $1", &[&uid]).await;
+                let _ = state.db.execute("UPDATE email_verification_tokens SET used = true WHERE token = $1", &[&token]).await;
+                tracing::info!("✅ Email verified: {}", email);
+                Html(auth_layout("Email Verified", &format!(r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🗄️ Email Verified</h1><div class="alert alert--ok">✅ Your email ({}) has been verified!</div><a href="/login" class="btn mt-2">Sign In</a></div>"#, email))).into_response()
+            } else {
+                Html(auth_layout("Verify Email", r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🗄️ Verify Email</h1><div class="alert alert--err">Invalid user ID.</div><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response()
+            }
+        }
+        _ => Html(auth_layout("Verify Email", r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🗄️ Verify Email</h1><div class="alert alert--err">Invalid or expired verification link.</div><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response(),
+    }
+}
+
+async fn reset_confirm_page(State(state): State<AppState>, jar: CookieJar, Query(q): Query<ResetConfirmQuery>) -> impl IntoResponse {
+    if get_session_token(&jar).is_some() { return Redirect::to("/dashboard").into_response(); }
+    let valid = match &q.token {
+        Some(t) => {
+            match state.db.query_one("SELECT COUNT(*) FROM password_reset_tokens WHERE token = $1 AND used = false AND expires_at > NOW()", &[&t]).await {
+                Ok(r) => { let c: i64 = r.get(0); c > 0 },
+                Err(_) => false,
+            }
+        }
+        None => false,
+    };
+    if valid {
+        Html(auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Set New Password</h1><form method="POST" action="/reset/confirm?token={}"><label>New Password</label><input type="password" name="password" required minlength="8" placeholder="Min 8 characters"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8" placeholder="Repeat password"/><button type="submit" class="btn mt-2" style="width:100%">Set Password</button></form></div>"#, q.token.unwrap()))).into_response()
+    } else {
+        Html(auth_layout("Reset Password", r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🔑 Reset Password</h1><div class="alert alert--err">Invalid or expired reset link.</div><a href="/reset" class="btn mt-2">Request New Link</a></div>"#)).into_response()
+    }
+}
+
+async fn reset_confirm_post(State(state): State<AppState>, jar: CookieJar, Query(q): Query<ResetConfirmQuery>, Form(form): Form<ResetConfirmPost>) -> impl IntoResponse {
+    let token = match q.token {
+        Some(t) => t,
+        None => return Html(reset_html(None, Some("No reset token"))).into_response(),
+    };
+    if form.password != form.password_confirm { return Html(auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Set New Password</h1><div class="alert alert--err">Passwords do not match.</div><form method="POST" action="/reset/confirm?token={}"><label>New Password</label><input type="password" name="password" required minlength="8"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8"/><button type="submit" class="btn mt-2" style="width:100%">Set Password</button></form></div>"#, token))).into_response(); }
+    if form.password.len() < 8 { return Html(auth_layout("Reset Password", &format!(r#"<div class="card" style="max-width:420px;margin:2rem auto"><h1>🔑 Set New Password</h1><div class="alert alert--err">Password must be 8+ characters.</div><form method="POST" action="/reset/confirm?token={}"><label>New Password</label><input type="password" name="password" required minlength="8"/><label>Confirm Password</label><input type="password" name="password_confirm" required minlength="8"/><button type="submit" class="btn mt-2" style="width:100%">Set Password</button></form></div>"#, token))).into_response(); }
+    match state.db.query_opt("SELECT user_id::text FROM password_reset_tokens WHERE token = $1 AND used = false AND expires_at > NOW()", &[&token]).await {
+        Ok(Some(row)) => {
+            let uid_str: String = row.get(0);
+            if let Ok(uid) = Uuid::parse_str(&uid_str) {
+                let pw_hash = hash_password(&form.password);
+                let _ = state.db.execute("UPDATE users SET password_hash = $1 WHERE id = $2", &[&pw_hash, &uid]).await;
+                let _ = state.db.execute("UPDATE password_reset_tokens SET used = true WHERE token = $1", &[&token]).await;
+                tracing::info!("✅ Password reset completed for user {}", uid_str);
+                Html(auth_layout("Password Reset", r#"<div class="card" style="max-width:420px;margin:3rem auto;text-align:center"><h1>🔑 Password Reset</h1><div class="alert alert--ok">✅ Password updated! You can now sign in.</div><a href="/login" class="btn mt-2">Sign In</a></div>"#)).into_response()
+            } else {
+                Html(reset_html(None, Some("Invalid user ID"))).into_response()
+            }
+        }
+        _ => Html(reset_html(None, Some("Invalid or expired reset link"))).into_response(),
+    }
+}
 
 // ============================================================
 // Handlers: Admin
@@ -456,6 +607,8 @@ async fn main() -> anyhow::Result<()> {
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "change-me".into());
     let turnstile_secret = std::env::var("TURNSTILE_SECRET_KEY").unwrap_or_default();
     let issuer_url = std::env::var("ISSUER_URL").unwrap_or_else(|_| "https://db.w9.nu".into());
+    let mail_api_token = std::env::var("W9_MAIL_API_TOKEN").unwrap_or_default();
+    let mail_base_url = std::env::var("W9_MAIL_BASE_URL").unwrap_or_else(|_| "https://mail.w9.nu".into());
     tracing::info!("Connecting to PostgreSQL...");
     let (client, conn) = tokio_postgres::connect(&db_url, NoTls).await?;
     tokio::spawn(async move { if let Err(e) = conn.await { tracing::error!("DB: {}", e); } });
@@ -466,11 +619,14 @@ async fn main() -> anyhow::Result<()> {
     let admin_email = std::env::var("W9_DB_ADMIN_EMAIL").unwrap_or_else(|_| "admin@w9.nu".into());
     let admin_pw = std::env::var("W9_DB_ADMIN_PASSWORD").unwrap_or_else(|_| "W9Admin123!".into());
     seed_admin(&db, &admin_email, &admin_pw).await;
-    let state = AppState { db, jwt_secret, turnstile_secret, issuer_url, http_client };
+    let state = AppState { db, jwt_secret, turnstile_secret, issuer_url, mail_api_token, mail_base_url, http_client };
     let router = Router::new()
         .route("/", get(home)).route("/login", get(login_page)).route("/login", post(login_post))
         .route("/register", get(register_page)).route("/register", post(register_post))
         .route("/reset", get(reset_page)).route("/reset", post(reset_post))
+        .route("/verify", get(verify_email))
+        .route("/reset/confirm", get(reset_confirm_page))
+        .route("/reset/confirm", post(reset_confirm_post))
         .route("/dashboard", get(dashboard)).route("/profile", get(profile_page)).route("/profile", post(profile_post))
         .route("/logout", get(logout))
         .route("/admin", get(admin_page)).route("/admin/promote/:id", get(admin_promote)).route("/admin/demote/:id", get(admin_demote))
